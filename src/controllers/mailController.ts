@@ -1,12 +1,13 @@
-import { Request, Response } from 'express';
-import { sendBulkEmails, Recipient } from '../services/sesService';
+import { Request, Response, NextFunction } from "express";
+import { sendBulkEmails, Recipient } from "../services/sesService";
+import { BadRequestError } from "forge-error";
 
-export async function handleJsonUpload(req: Request, res: Response) {
+export async function handleJsonUpload(req: Request, res: Response, next: NextFunction) {
   try {
     const { subject, body, recipients } = req.body;
 
     if (!subject) {
-      return res.status(400).json({ error: 'Subject is required' });
+      throw new BadRequestError("Subject is required");
     }
 
     const recipientList: Recipient[] = Array.isArray(recipients)
@@ -16,30 +17,24 @@ export async function handleJsonUpload(req: Request, res: Response) {
       : [];
 
     if (recipientList.length === 0) {
-      return res
-        .status(400)
-        .json({ error: 'Recipients must be a non-empty object or array' });
+      throw new BadRequestError("Recipients must be a non-empty object or array");
     }
 
-    // Clean and validate
     const validRecipients: Recipient[] = recipientList
       .map((r: any) => ({
-        name: r?.name?.toString().trim() || '',
-        email: r?.email?.toString().trim() || '',
+        name: r?.name?.toString().trim() || "",
+        email: r?.email?.toString().trim() || "",
       }))
-      .filter((r) => r.email && r.email.includes('@'));
+      .filter((r) => r.email && r.email.includes("@"));
 
     if (!validRecipients.length) {
-      return res.status(400).json({ error: 'No valid recipient emails found' });
+      throw new BadRequestError("No valid recipient emails found");
     }
 
     const summary = await sendBulkEmails(validRecipients, subject, body);
 
-    return res.json(summary); // sendBulkEmails already returns success/failure
-  } catch (err: any) {
-    console.error('handleJsonUpload error', err);
-    return res
-      .status(500)
-      .json({ error: err?.message || 'Internal server error' });
+    return res.json(summary);
+  } catch (err) {
+    next(err);
   }
 }

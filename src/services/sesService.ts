@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import pLimit from "p-limit";
-import { envConfig } from "../config/config";
-import { renderTemplate, TemplateData } from "./templateService";
+import { InternalServerError, BadRequestError } from "forge-error";
+import { envConfig } from "../config/congifs";
 
 const FROM_EMAIL = envConfig.fromEmail;
 const MAX_CONCURRENCY = envConfig.maxConcurrency;
@@ -21,7 +21,7 @@ export type Recipient = { name?: string; email: string };
 function replacePlaceholders(template: string, data: Recipient) {
   return template
     .replace(/\/\/name\/\//g, data.name || "")
-    .replace(/\/\/email\/\//g, data.email || "");
+    .replace(/\/\/email\/\//g, data.email ? `<a href="mailto:${data.email}">${data.email}</a>` : "");
 }
 
 export async function sendEmail(
@@ -29,22 +29,31 @@ export async function sendEmail(
   subject: string,
   body?: string
 ) {
-  const html = body
-    ? replacePlaceholders(body, recipient)
-    : renderTemplate(recipient);
+  try {
+    if (!body) {
+      throw new BadRequestError("Email body is required");
+    }
 
-  const mailOptions = {
-    from: FROM_EMAIL,
-    to: recipient.email,
-    subject,
-    html,
-  };
+    // Always replace placeholders in the provided body
+    const html = replacePlaceholders(body, recipient);
 
-  return transporter.sendMail(mailOptions);
+    const mailOptions = {
+      from: FROM_EMAIL,
+      to: recipient.email,
+      subject,
+      html,
+    };
+
+    return await transporter.sendMail(mailOptions);
+  } catch (err: any) {
+    throw new InternalServerError(
+      `Failed to send email to ${recipient.email}: ${err.message}`
+    );
+  }
 }
 
 export async function sendBulkEmails(
-  recipients: Recipient | Recipient[], 
+  recipients: Recipient | Recipient[],
   subject: string,
   body?: string
 ) {
@@ -69,7 +78,6 @@ export async function sendBulkEmails(
             messageId: info.messageId,
           });
         } catch (err: any) {
-          console.error(`Email error for ${recipient.email}`, err);
           results.push({
             to: recipient.email,
             ok: false,
@@ -82,21 +90,19 @@ export async function sendBulkEmails(
 
   const allSuccess = results.every((r) => r.ok);
 
-  if (allSuccess) {
-    return {
-      success: true,
-      message: "All emails sent successfully!",
-      total: recipientList.length,
-      details: results,
-    };
-  } else {
-    return {
-      success: false,
-      message: "Some emails failed to send.",
-      total: recipientList.length,
-      sent: results.filter((r) => r.ok).length,
-      failed: results.filter((r) => !r.ok).length,
-      details: results,
-    };
-  }
+  return allSuccess
+    ? {
+        success: true,
+        message: "All emails sent successfully!",
+        total: recipientList.length,
+        details: results,
+      }
+    : {
+        success: false,
+        message: "Some emails failed to send.",
+        total: recipientList.length,
+        sent: results.filter((r) => r.ok).length,
+        failed: results.filter((r) => !r.ok).length,
+        details: results,
+      };
 }

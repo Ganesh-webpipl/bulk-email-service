@@ -3,25 +3,31 @@ import pLimit from "p-limit";
 import { InternalServerError, BadRequestError } from "forge-error";
 import { envConfig } from "../config/congifs";
 
+// Sender email & concurrency settings
 const FROM_EMAIL = envConfig.fromEmail;
 const MAX_CONCURRENCY = envConfig.maxConcurrency;
 
+// Create Nodemailer transporter
 const transporter = nodemailer.createTransport({
   host: envConfig.smtp.host,
   port: envConfig.smtp.port,
-  secure: envConfig.smtp.port === 465,
+  secure: envConfig.smtp.port === 465, // true for 465, false for other ports
   auth: {
     user: envConfig.smtp.user,
     pass: envConfig.smtp.pass,
   },
 });
 
-export type Recipient = { name?: string; email: string };
+export type Recipient = { [key: string]: any };
 
 function replacePlaceholders(template: string, data: Recipient) {
-  return template
-    .replace(/\/\/name\/\//g, data.name || "")
-    .replace(/\/\/email\/\//g, data.email ? `<a href="mailto:${data.email}">${data.email}</a>` : "");
+  return template.replace(/\/\/(\w+)\/\//g, (_, key) => {
+    const value = data[key] ?? "";
+    if (key.toLowerCase() === "email" && value) {
+      return `<a href="mailto:${value}">${value}</a>`;
+    }
+    return value;
+  });
 }
 
 export async function sendEmail(
@@ -34,7 +40,6 @@ export async function sendEmail(
       throw new BadRequestError("Email body is required");
     }
 
-    // Always replace placeholders in the provided body
     const html = replacePlaceholders(body, recipient);
 
     const mailOptions = {
@@ -43,6 +48,11 @@ export async function sendEmail(
       subject,
       html,
     };
+    console.log("mailOptionsfrom", mailOptions.from);
+    console.log("mailOptionsto", mailOptions.to);
+
+    console.log("mailOptionssubject", mailOptions.subject);
+    console.log("mailOptionshtml", mailOptions.html);
 
     return await transporter.sendMail(mailOptions);
   } catch (err: any) {
@@ -52,6 +62,7 @@ export async function sendEmail(
   }
 }
 
+// Send bulk emails
 export async function sendBulkEmails(
   recipients: Recipient | Recipient[],
   subject: string,
